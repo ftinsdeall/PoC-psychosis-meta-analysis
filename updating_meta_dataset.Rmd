@@ -1,0 +1,134 @@
+---
+title: "updating_meta_dataset"
+author: "Francesca Tinsdeall"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(readr)
+library(tidyverse)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(janitor)
+library(ggplot2)
+library(meta)
+library(metafor)
+library(dmetar)
+library(gridExtra)
+
+```
+
+```{r - get background noise used for each comparison (done in excel)}
+
+dat.1 <- read.csv('meta_data.1.csv') 
+
+dat.1.2 <- dat.1 %>% 
+  left_join(dat_backgrounds)
+
+dat.1.2[dat.1.2 == ''] <- NA
+
+dat.2.0 <- dat.1.2 %>% 
+  filter(is_this_ppi_for_a_specific_pre_pulse_intensity_or_averaged_across_multiple == '%PPI for specific pre-pulse intensity ') %>% 
+  mutate(prepulse_intensity_d_b = as.numeric(prepulse_intensity_d_b), 
+         background_db = as.numeric(background_db)) %>% 
+  mutate(pre_pulse_level_above_back = prepulse_intensity_d_b - background_db) %>% 
+  mutate(prepulse_intensity_d_b = as.character(prepulse_intensity_d_b))
+
+dat.2.1 <- dat.1.2 %>% 
+  left_join(dat.2.0)
+
+
+```
+
+
+```{r - create adjusted mean PPI variables}
+dat.2.2 <- dat.2.1 %>% 
+  mutate(d.mean.adj = 100 - d.mean, 
+         c.mean.adj = 100 -c.mean)
+
+```
+
+```{r - create dataset with developmental stage of animals at time of PPI testing variable}
+#using time frames defined by ZB
+
+dat.2.3 <- dat.2.2 %>% 
+  filter(species_of_animal == 'mouse') %>% 
+  mutate(developmental_stage_PPI = case_when(time <= 28 ~ 'infant', 
+                                             time <= 42 & time > 28 ~ 'juvenile', 
+                                             time <= 56 & time > 42 ~ 'adolescent', 
+                                             time > 56 ~ 'adult'))
+
+
+dat.2.4 <- dat.2.2 %>% 
+  filter(species_of_animal == 'rat') %>% 
+  mutate(developmental_stage_PPI = case_when(time <= 21 ~ 'infant', 
+                                             time <= 35 & time > 21 ~ 'juvenile', 
+                                             time <= 50 & time > 35 ~ 'adolescent', 
+                                             time > 50 ~ 'adult'))
+dat.2.5 <- dat.2.3 %>% 
+  full_join(dat.2.4)
+
+dat <- dat.2.5
+write.csv(dat.2.5, 'meta_data.1.csv')
+
+```
+
+```{r - create variable for whether PPI dose was low, moderate or high}
+# categories adapted from https://www.sciencedirect.com/science/article/pii/S0149763405000813 
+
+dat2.6 <- dat %>% 
+  mutate(polyIC.dose.cat = case_when(poly_I_C_daily_dose_mg_kg < 4 ~ 'low', 
+                                     poly_I_C_daily_dose_mg_kg < 10 & poly_I_C_daily_dose_mg_kg >= 4 ~ 'moderate', 
+                                     poly_I_C_daily_dose_mg_kg >= 10 ~ 'high'))
+
+dat <- dat2.6
+                                     
+write.csv(dat, 'meta_data.csv')                                          
+```
+
+```{r - gestational stage at time of polyI:C administration}
+# categories taken from recent SR on MIA model https://www.sciencedirect.com/science/article/pii/S0149763421003158#sec0035
+
+SMD.g.mice <- SMD.g %>% 
+  filter(species_of_animal == 'mouse') %>% 
+  mutate(gestational_stage_poly = case_when(GD_first_administration < 7 ~ 'early gestation',
+                                            GD_first_administration >= 7 & GD_first_administration < 10 ~ 'early-mid gestation', 
+                                            GD_first_administration >= 10 & GD_first_administration < 15 ~ 'mid-late gestation', 
+                                            GD_first_administration >= 15 & GD_first_administration <= 18 ~ 'late gestation'))
+
+SMD.g.rat <- SMD.g %>% 
+  filter(species_of_animal == 'rat') %>% 
+  mutate(gestational_stage_poly = case_when(GD_first_administration < 9 ~ 'early gestation',
+                                            GD_first_administration >= 9 & GD_first_administration <= 11 ~ 'early-mid gestation', 
+                                            GD_first_administration >= 12 & GD_first_administration < 17 ~ 'mid-late gestation', 
+                                            GD_first_administration >= 17 & GD_first_administration <= 21 ~ 'late gestation'))
+
+SMD.g <- SMD.g.mice %>% 
+  full_join(SMD.g.rat) 
+
+```
+
+
+```{r - categorisation of effect size as - small, moderate, large or + small, moderate, large}
+SMD.g <- SMD.g %>% 
+  mutate(magnitude_effect_size = case_when(SMD == 0 | SMD < 0 & SMD >= -.2 |SMD > 0 & SMD <= .2 ~ 'no effect', 
+                                           SMD < -.2 & SMD >= -.5 ~ 'small negative effect', 
+                                           SMD > .2 & SMD <= .5 ~ 'small positive effect', 
+                                           SMD < -.5 & SMD >= -.8 ~ 'moderate negative effect', 
+                                           SMD > .5 & SMD <= .8 ~ 'moderate positive effect', 
+                                           SMD < -.8 ~ 'large negative effect', 
+                                           SMD > .8 ~ 'large positive effect'))
+```
+
+Cohen's rule of thumb: ref. Cohen (1977), "Statistical Power Analysis for the Behavioral Sciences", Routledge.
+
+Small effect (cannot be discerned by the naked eye) = 0.2
+Medium Effect = 0.5
+Large Effect (can be seen by the naked eye) = 0.8
+
+
+

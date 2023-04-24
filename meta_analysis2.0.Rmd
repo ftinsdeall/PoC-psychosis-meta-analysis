@@ -1,0 +1,959 @@
+---
+title: "meta_analysis2.0"
+author: "Francesca Tinsdeall"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(tidyverse, 
+               knitr,
+               here,
+               DT,
+               readxl, 
+               metafor,
+               clubSandwich,
+               orchaRd, 
+               MuMIn,
+               patchwork,
+               GoodmanKruskal,
+               networkD3,
+               ggplot2,
+               plotly,
+               ggsignif,
+               visdat,
+               ggalluvial,
+               ggthemr, 
+               cowplot,
+               grDevices,
+               png,
+               grid,
+               gridGraphics,
+               pander,
+               formatR,
+               rmdformats
+               )
+
+install.packages("pacman")
+pacman::p_load(devtools, tidyverse, metafor, patchwork, R.rsp, emmeans)
+
+devtools::install_github("daniel1noble/orchaRd", force = TRUE)
+devtools::install_github('cttobin/ggthemr')
+
+devtools::install_github("dsquintana/metameta")
+library(metameta)
+
+write.csv(SMD.g, 'meta.csv')
+SMD.g <- read.csv('meta.csv')
+```
+
+# Single level random effects model 
+
+## 1. Calculate effect size (SMD)
+
+Hedges g to account for small sample sizes (default for SMD when using the escalc() function) - Hedge’s g (statistically corrects for variance that may be introduced when sample sizes are small (Larry V. Hedges 1981)). Of note, I use the “true” number of control animals (c.n), where the sample size of the control group is divided by the number of treatment groups it serves (if one control group serves multiple treatment groups), to avoid control groups contributing multiple times to the calculation of an effect size (Vesterinen et al., 2014). 
+
+```{r - calculate effect sizes - don't need to run this chunk because SMD already in meta.csv dataset}
+SMD.g <- escalc("SMD",                          
+                       m1i = d.mean,        
+                       n1i = d.n, 
+                       sd1i = d.sd, 
+                       m2i = c.mean, 
+                       n2i = c.n, 
+                       sd2i = c.sd, 
+                       data = SMD.g
+                       ) %>% 
+  rename(SMD = yi, 
+         SMDV = vi)
+```
+(go to new_variables_for_dependence for updated SMD.g dataset if clear environment)
+
+## 2. Fit a simple random effects model - assumes independence 
+
+```{r - random effects model}
+random_SMD <- metafor::rma(yi = SMD, # observed effect sizes / estimates of SMD; the outputs of escalc() function; 
+                               vi = SMDV, # the estimates of sampling variance of SMD; 
+                               test = "t", # the t-distribution is specified to calculate confidence intervals, and p-value for model coefficient (beta0 in Equation 1); alternative method: "z", which uses a standard normal distribution;
+                               data = SMD.g, # the dataset 
+                               method = 'REML'
+                              ) 
+summary(random_SMD)
+
+```
+Pooled effect size estimate = -0.3983 
+Significance level of effect size estimate = 0.001
+Standard error of estimate = 0.0401
+I2 value = 62.82% 
+
+
+# Determine random effect variables that should be included in model - have to use ML rather than REML so that anova comparison works 
+
+## 1. Introduce study_id as a random variable 
+
+Study identity (study_id_str) - unique ID for each extracted original experimental paper; modelling it as a random-effect means to allow true effect sizes to vary across studies, such that the model can estimate between-study level variance and partition between-study level heterogeneity
+
+```{r - introduce study_id_str as a random effect}
+ul <- rma.mv(yi = SMD, V = SMDV, data = SMD.g, method = 'ML') #unilevel for comparison
+
+ml_study <- rma.mv(yi = SMD, V = SMDV, random = ~ 1 | study_id_str, data = SMD.g, method = 'ML') #2-level with study_id_str
+
+summary(ml_study)
+i2_ml(ml_study)
+```
+Pooled effect size = -0.5687
+Significance level of effect size estimate = 0.0001
+Standard error of estimate = 0.1026
+I2 value = 75.9% 
+
+```{r - test whether introducing study_id_str as a random effect improves model fit}
+anova.rma(ml_study, ul)
+```
+Introducing study_id_str as a random effect significantly improves model fit (LRT = 201.7, p < 0.0001)
+AIC for ml_study = 441.39
+AIC for ul = 641.1
+
+
+## 2. Introduce effect_ID as a random variable (within study variation)
+
+Effect size identity (effect_id) - unique ID for each pairwise comparison used to calculate effect sizes; modelling it as a random-effect means to allow true effect sizes to vary within studies, such that the model can estimate within-study (effect size) level variance and partition within-study (effect size) level heterogeneity. 
+
+
+```{r - introduce comparison_id as a random effect}
+ml_effect <- rma.mv(yi = SMD, V = SMDV, random = ~ 1 | effect_id, data = SMD.g, method = 'ML')
+
+summary(ml_effect)
+i2_ml(ml_effect)
+```
+Pooled effect size = -0.3981
+Significance level of effect size estimate = 0.0001
+Standard error of estimate = 0.0400
+
+I2 value = 62.6% 
+
+```{r - test whether introducing comparison_id as a random effect improves model fit}
+anova.rma(ml_effect, ul)
+```
+Introducing effect_id as a random effect significantly improves model fit (LRT = 113.1, p < 0.0001
+AIC for ml_effect = 530
+AIC for ul = 641.1
+
+## 3. Combine study_id and effect_id to generate 3-level RMA model
+
+
+```{r - introduce both study_id and comparison_id as random effects}
+ml_study.effect <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / effect_id, data = SMD.g, method = 'ML')
+
+summary(ml_study.effect)
+i2_ml(ml_study.effect)
+```
+Pooled effect size = -0.5671
+Significance level of effect size estimate = 0.0001
+Standard error of estimate = 0.1022
+
+Overall I2 value = 76.8% 
+I2 value attributable to between study variance = 70.6%
+I2 value attributable to within study variance = 6.18%
+
+**random = ~1 | study_id_str / effect_id** tells r that the effect_id variable is a random effect within the study_id_str variable
+
+### 4. Assess whether both study_id and comparison_id are needed as random effects in the RMA model 
+```{r - test whether introducing comparison_id as a random effect to ml_study improves model fit}
+anova.rma(ml_study.effect, ml_study)
+```
+Introducing effect_id as a random effect (in addition to study_id_str) signficantly improves the fit of the model (LRT = 6.3919, p = 0.0115)
+AIC for ml_study.effect = 437
+AIC for ml_study = 441.39
+
+Therefore, at least a 3-level random effect model is needed to account for non-independence in my data. 
+Level 1: the sampling variance effect (used to account for sampling/measurement error effect in effect size)
+Level 2: the effect_id (used to account for within-study random effect and uses corresponding variance component (σ within) to capture within study-specific heterogeneity) 
+Level 3: the study_id (used to account for between-study random effect and uses corresponding variance component (σ between) to capture study-specific heterogeneity)
+
+
+
+# Other levels of non-independence in my data 
+
+## 1. Effect sizes from same cohorts, same time point but slightly different outcome measure i.e. %PPI measurements with one different parameter (e.g. different prepulse, different ITI, different pulse, different prepulse duration) but other parameters the same
+
+```{r - introduce same_time_diff_outcome as a random effect to ml.study.effect}
+ml_study.effect.outcome <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / effect_id, 
+                                  data = SMD.g, method = 'ML')
+summary(ml_study.effect.outcome)
+i2_ml(ml_study.effect.outcome)
+anova.rma(ml_study.effect.outcome, ml_study.effect)
+```
+Pooled effect size = -0.5585
+Significance level of effect size estimate = 0.0001
+Standard error of estimate = 0.1004
+
+Overall I2 value = 76.28892% 
+I2 value attributable to between study variance = 60.044%
+I2 value attributable to within study variance from effect sizes measuring PPI in the same cohort, at the same time, but using slightly different PPI testing parameters = 15.3366% 
+I2 value attributable to residual within study variance = 0.908% 
+
+Introducing same_time_diff_outcome as a random effect significantly improves the fit of the model (LRT = 10.429, p = 0.0012)
+AIC for ml_study.effect.outcome = 428.49
+AIC for ml_study.effect = 437.00
+
+So the model is now 4 level: 
+Level 1: the sampling variance effect (used to account for sampling/measurement error effect in effect size)
+Level 2: the effect_id (used to account for residual within-study random effect e.g. due to animals in same study being kept in same conditions, animals are likely all from the same breeder) 
+Level 3: the same_cohort_diff_PPI_param variable (groups effect sizes generated from the same disease and control cohorts, but from slightly different %PPI testing parameters (a level of within-study random effect)
+Level 4: the study_id (used to account for between-study random effect and uses corresponding variance component (σ between) to capture study-specific heterogeneity)
+
+## 2. Effect sizes from same cohorts, same outcome measure, different time point 
+
+```{r - introduce same_coh_same_PPI_param_diff_time as a random effect to ml.study.effect}
+ml_study.effect.outcome.time <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                       data = SMD.g, method = 'ML')
+summary(ml_study.effect.outcome.time)
+i2_ml(ml_study.effect.outcome.time)
+anova.rma(ml_study.effect.outcome.time, ml_study.effect.outcome)
+```
+Pooled effect size = -0.5585
+Significance level of effect size estimate = 0.0001
+Standard error of estimate = 0.1004
+
+Overall I2 value = 76.29536% 
+I2 value attributable to between study variance = 60.047%
+I2 value attributable to within study variance from effect sizes measuring PPI in the same (disease and control) cohorts but using slightly different PPI testing parameters = 15.308% 
+I2 value attributable to within study variance from effect sizes measuring PPI in the same (disease and control) cohorts, using exactly the same PPI testing parameters, but at different time points = 0.939%
+I2 value attributable to variance between PPI measuremetns using the same parameters, in the same cohort, but at different time points 
+I2 value attributable to residual within study variance =  0.0000039%
+
+Introducing same_coh_same_PPI_param_diff_time as a random effect does not improve fit of existing model (p=0.9001) - if anything makes it a tiny bit worse (but should still be included to account for non-independence)
+AIC for ml_study.effect.outcome.time = 430.47
+AIC for ml_study.effect.outcome = 428.49
+
+Even though including same_coh_same_PPI_param_diff_time does not improve fit of the model, this level of dependence should still be included as a random effect to account for non-independence at this level. 
+
+So the model is now 5 level: 
+Level 1: the sampling variance effect (used to account for sampling/measurement error effect in effect size)
+Level 2: the effect_id (used to account for residual within-study random effect e.g. due to animals in same study being kept in same conditions, animals likely from the same breeder) 
+Level 3: the same_cohort_same_PPI_param_diff_time variable (groups effect sizes measured in the same cohorts, using exactly the same PPI testing parameters but at different time points (a level of within-study random effect)
+Level 4: the same_cohort_diff_PPI_param variable (groups effect sizes from the same disease and control cohorts, but from slightly different %PPI testing parameters (a level of within-study random effect)
+Level 5: the study_id (used to account for between-study random effect and uses corresponding variance component (σ between) to capture study-specific heterogeneity)
+
+# Change method back to REML for improved model and assess output 
+```{r - introduce same_coh_same_PPI_param_diff_time as a random effect to ml.study.effect}
+ml_study.effect.outcome.time.re <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                       data = SMD.g, method = 'REML')
+summary(ml_study.effect.outcome.time.re)
+i2_ml(ml_study.effect.outcome.time.re)
+```
+Pooled effect size = -0.5602
+Significance level of effect size estimate = 0.0001
+Standard error of estimate = 0.1018
+
+Overall I2 value = 76.8222% 
+I2 value attributable to between study variance = 61.01087% 
+
+I2 value attributable to within study variance from effect sizes measuring PPI in the same (disease and control) cohorts but using slightly different PPI testing parameters = 14.88927 
+I2 value attributable to within study variance from effect sizes measuring PPI in the same (disease and control) cohorts, using exactly the same PPI testing parameters, but at different time points = 0.9221%
+I2 value attributable to residual within study variance =  0.0000041%
+
+Total within study variance not due to sampling error = 15.81%
+
+Interpreted I2 of 25%, 50%, and 75% as small, medium, and large variance, respectively https://pubmed.ncbi.nlm.nih.gov/12111919/
+
+
+## Orchard plot of multilevel random effect model 
+
+Traditional forest plots are not suited to visualizing large data-sets where the number of effect sizes is high. Given that my dataset contains 247 unique effect sizes from 48 studies, I therefore decided to use the relatively novel orchard plot to visualise the output of my meta-analytic models throughout this meta-analysis. Although originally designed for use in ecology, these information-rich 'forest-like' plots are well suited to any datasets containing >100 effect sizes https://onlinelibrary.wiley.com/doi/10.1002/jrsm.1424 for description of plot features (e.g. 'twigs' are CI's)
+
+
+```{r - orchard plot of 5-level model}
+orchard_plot(ml_study.effect.outcome.time.re, xlab = "Standardised mean difference (SMD)", group = "study_id_str", data = SMD.g, k = TRUE, g = TRUE, transfm = "none", angle = 0)
+```
+
+
+# Construct VCV matrix to account for non-independence in sampling errors (sampling covariance)
+
+Multiple effect sizes from the same study can result in two types of data non-independence: independence between effect size estimates (i.e., correlated effect size) and non-independence between sampling errors (i.e., correlated errors). The use of multilevel model with an appropriate random-effects structure can only capture the non-independence between effect size estimates. Using a variance-covariance (VCV) matrix within a multilevel model can capture the non-independence between sampling errors. Given that many of the studies within my meta-analysis use the same control cohort for multiple disease cohorts, there will be correlation of sampling errors within my data. 
+
+## 1. Construct VCV matrix 
+
+Although we are not able to construct an exact VCV  matrix (due to missing rho), we can impute a **VCV** matrix by assuming a constant sampling correlation $\rho$ across different studies. Assuming a rho value of 0.5, seems to be a plausible and safe assumption across many situations
+
+```{r - impute a VCV matrix assuming rho value of 0.5}
+VCV.5 <- vcalc(vi = SMDV, 
+             cluster = study_id_str, 
+             obs = effect_id, 
+             data = SMD.g, 
+             rho = 0.5)
+```
+
+## 2. Fit RMA with VCV (assuming .5 rho) instead of SMDV
+```{r - fit 5-level model using VCV}
+ml_study.effect.outcome.time.re.VCV.5 <- rma.mv(yi = SMD, V = VCV.5, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                       data = SMD.g, method = 'REML')
+
+summary(ml_study.effect.outcome.time.re.VCV.5)
+i2_ml(ml_study.effect.outcome.time.re.VCV.5)
+```
+Pooled SMD effect size = 0.4932 
+Significance level of effect size estimate = 0.0001
+SD of SMD (standard error of estimate) = 0.0891
+
+Overall I2 value = 71.794% 
+I2 value attributable to between study variance = 31.5832% 
+
+I2 value attributable to within study variance from effect sizes measuring PPI in the same (disease and control) cohorts but using slightly different PPI testing parameters = 24.1703%
+I2 value attributable to within study variance from effect sizes measuring PPI in the same (disease and control) cohorts, using exactly the same PPI testing parameters, but at different time points = 0.0000047%
+I2 value attributable to residual within study variance =  15.6258%
+
+Total within study variance not due to sampling error = 40.211%
+
+```{r - orchard plot of 5-level VCV model}
+orchard_plot(ml_study.effect.outcome.time.re.VCV.5, xlab = "Standardised mean difference (SMD)", group = "study_id_str", data = SMD.g, k = TRUE, g = TRUE, transfm = "none", angle = 0)
+```
+
+## 3. Sensitivity analysis 
+
+### Rho 0.2
+```{r - impute a VCV matrix assuming rho value of 0.2}
+VCV.2 <- vcalc(vi = SMDV, 
+             cluster = study_id_str, 
+             obs = effect_id, 
+             data = SMD.g, 
+             rho = 0.2)
+```
+
+```{r - fit 5-level model using VCV}
+ml_study.effect.outcome.time.re.VCV.2 <- rma.mv(yi = SMD, V = VCV.2, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                       data = SMD.g, method = 'REML')
+
+summary(ml_study.effect.outcome.time.re.VCV.2)
+i2_ml(ml_study.effect.outcome.time.re.VCV.2)
+```
+Pooled SMD effect size = 0.5357 
+Significance level of effect size estimate = 0.0001
+SD of SMD (standard error of estimate) = 0.0971
+
+Overall I2 value = 74.7577% 
+I2 value attributable to between study variance = 51.0091% 
+
+I2 value attributable to within study variance from effect sizes measuring PPI in the same (disease and control) cohorts but using slightly different PPI testing parameters = 18.582%
+I2 value attributable to within study variance from effect sizes measuring PPI in the same (disease and control) cohorts, using exactly the same PPI testing parameters, but at different time points = 0.0000324%
+I2 value attributable to residual within study variance =  5.16602%
+
+Total within study variance not due to sampling error = 23.748%
+
+### Rho 0.7
+```{r - impute a VCV matrix assuming rho value of 0.7}
+VCV.7 <- vcalc(vi = SMDV, 
+             cluster = study_id_str, 
+             obs = effect_id, 
+             data = SMD.g, 
+             rho = 0.7)
+```
+
+```{r - fit 5-level model using VCV}
+ml_study.effect.outcome.time.re.VCV.7 <- rma.mv(yi = SMD, V = VCV.7, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                       data = SMD.g, method = 'REML')
+
+summary(ml_study.effect.outcome.time.re.VCV.7)
+i2_ml(ml_study.effect.outcome.time.re.VCV.7)
+```
+Pooled SMD effect size = 0.4609
+Significance level of effect size estimate = 0.0001
+SD of SMD (standard error of estimate) = 0.0832
+
+Overall I2 value = 69.1085% 
+I2 value attributable to between study variance = 15.8304% 
+
+I2 value attributable to within study variance from effect sizes measuring PPI in the same (disease and control) cohorts but using slightly different PPI testing parameters = 27.023%
+I2 value attributable to within study variance from effect sizes measuring PPI in the same (disease and control) cohorts, using exactly the same PPI testing parameters, but at different time points = 0.00000474%
+I2 value attributable to residual within study variance =  26.255%
+
+Total within study variance not due to sampling error = 53.278%
+
+
+# Meta-analysis of variation (lnVR and lnCVR)
+
+The log-transformed variability ratio, lnVR, quantifies the difference in variance (SD) around the mean between two arms (i.e., estimating inter-individual variability between two arms or heterogeneity of treatment effect; Nakagawa et al., 2015; Senior et al., 2020). The log-transformed coefficient of variation ratio (lnCVR) is a mean-adjusted version of lnVR, where the indirect impact of mean on its variability is controlled for (i.e., accounting for the mean-variance relationship; Nakagawa et al., 2015; Volkmann et al., 2020). 
+
+I wanted to caluclate lnVR and lnCVR to investigate the external validity of the polyI:C MIA developmental model of psychosis. You would hope that there would not be a significant difference in inter-individual variability between the polyI:C and control cohort groups. If the lnVR or lnCVR value is positive, this indicates that polyI:C exposure during gestation increases the inter-individual variability differences in offspring pre-pulse inhibition response. If this is the case, this suggests that reproducibility of %PPI results derived from the polyI:C model of psychosis is limited - thus identifying a shortcoming in the external validity of the model. 
+
+## 1. Calculate lnVR 
+
+```{r - lnVR}
+lnVR <- escalc("VR",                          
+               m1i = c.mean.adj,        
+               n1i = c.n, 
+               sd1i = c.sd, 
+               m2i = d.mean.adj, 
+               n2i = d.n, 
+               sd2i = d.sd,
+               data = SMD.g, 
+               digits = 3,
+               append = TRUE) %>% 
+  rename(VR = yi, 
+         VRV = vi)
+```
+
+## 1.2 Fit 5 level RMA model to lnVR
+
+```{r - fit multilevel RMA to lnVR}
+ml_study.effect.outcome.time.re_VR <- rma.mv(yi = VR, V = VRV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                       data = lnVR, method = 'REML')
+
+summary(ml_study.effect.outcome.time.re_VR)
+```
+Pooled lnVR estimate = -0.0544
+p = 0.2522 
+The results of meta-analysis using lnVR as an effect size suggest that there is no significant different in inter-individual variance of mean %PPI between polyI:C treated and vehicle treated cohorts
+
+## 2. Calculate lnCVR 
+
+```{r - lnCVR}
+lnCVR <- escalc("CVR",                          
+               m1i = c.mean.adj,        
+               n1i = c.n, 
+               sd1i = c.sd, 
+               m2i = d.mean.adj, 
+               n2i = d.n, 
+               sd2i = d.sd,
+               data = SMD.g, 
+               digits = 3,
+               append = TRUE) %>% 
+  rename(CVR = yi, 
+         CVRV = vi)
+```
+
+## 2.1 Fit 5 level RMA model to lnVR
+
+```{r - fit multilevel RMA to lnVR}
+ml_study.effect.outcome.time.re_CVR <- rma.mv(yi = CVR, V = CVRV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                       data = lnCVR, method = 'REML')
+
+summary(ml_study.effect.outcome.time.re_CVR)
+
+orchard_plot(ml_study.effect.outcome.time.re_CVR, xlab = "lnCVR", group = "study_id_str", data = lnCVR, k = TRUE, g = TRUE, transfm = "none", angle = 0)
+```
+Pooled lnCVR estimate = 0.0904
+p = 0.0645
+The results of meta-analysis using lnCVR as an effect size confirm that that there is no significant different in inter-individual variance of mean %PPI between polyI:C treated and vehicle treated cohorts, even after controlling for mean-variance relationship. This suggests that the polyI:C MIA model of psychosis has good reproducibility, a factor that contributes to its external validity 
+
+https://journals.plos.org/plosbiology/article?id=10.1371/journal.pbio.3001009 (paper discussing results reproducibility in preclinical models)
+
+
+# Test for publication bias 
+
+Identifying publication bias is a crucial and mandatory procedure of a meta-analysis because the validity of meta-analytic evidence would be undermined if publication bias occurs (Augusteijn et al., 2019*, Nakagawa et al., 2017, Van Aert et al., 2019b). 
+Common methods for testing publication bias are invalid if effect sizes are statistically dependent. Therefore, funnel plots, conventional Egger’s regression and trim-and-fill tests are often not suitable to test publication bias for animal data meta-analyses (Rodgers and Pustejovsky, 2021*, Sterne et al., 2001a).
+
+## 1. Extended Egger's regression (small study effect)
+The most common testable form of publication bias is the small-study effect where small studies (i.e., small sample size) often tend to report large effect sizes (Sterne et al., 2000). A multilevel version of Egger’s regression has recently been proposed to overcome the limitations of conventional Egger's regression and allow assessment of small study effect in meta-analyses containing non-independent effect sizes (Fernández-Castilla et al., 2021, Nakagawa et al., 2021a). In brief, sampling error is added as a moderator variable to a multilevel random effects model. 
+
+A potential improvement on this approach is to use ‘effective sample size’ instead of sampling error (Nakagawa et al., 2021a** - https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/2041-210X.13724). When using SMD as an effect size metric, using Egger’s test to identify small-study effect may produce false-positive results. The SE of a given SMD is artifactually correlated with the SMD, meaning that SMD's SE is dependent on SM. 
+
+```{r - Egger's regression using correct SMD sampling error}
+SMD.g$SMDSE_c <- with(SMD.g ,sqrt((d.n + c.n)/(d.n*c.n)))
+
+pub_bias.ss <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                   mods = ~ SMDSE_c, 
+                   data = SMD.g, 
+                   test = 't',
+                   method = 'REML')
+
+summary(pub_bias.ss)
+```
+Regression slope of the adapted SE = 1.315 
+p = 0.1605
+Slope is is not statistically different from zero. This means that smaller studies (with larger sampling error) do not have larger effect sizes i.e. no small-study effect exists in this dataset
+
+```{r - visualise Egger's regression}
+bubble_plot(pub_bias.ss, mod = "SMDSE_c", 
+            xlab = "Corrected sampling error", ylab = "Effect size estimates (SMD)",
+            group = "study_id_str",
+            data = SMD.g, legend.pos = "none") 
+```
+
+## 2. Time-lag bias 
+Similarly, including publication year as a moderator variable can be used to detect the decline effect i.e., time-lag bias (defined as the temporal instability of the magnitude of effect sizes), the implication of which is underappreciated (Grainger et al., 2020, Koricheva and Kulinskaya, 2019
+
+```{r - time-lag bias}
+pub_bias.tl <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                   mods = ~ year, 
+                   data = SMD.g, 
+                   test = 't',
+                   method = 'REML')
+
+summary(pub_bias.tl)
+```
+Regression slope of year of publication = -0.0279
+p = 0.2697
+The regression slope is not statistically different from zero. This indicates that studies with statistically significant findings do not tend to be published earlier than these with "negative" results, i.e. no time-lag bias exists in this dataset
+
+```{r - visualise relationship between year of publication and SMD (time-lag bias) in dataset}
+bubble_plot(pub_bias.tl, mod = "year", 
+            xlab = "Year of publication", ylab = "Effect size estimates (SMD)",
+            group = "study_id_str",
+            data = SMD.g, legend.pos = "none") 
+```
+
+## Notes on interpreting publication bias tests with caution (from Nakagawa et al., 2021a)
+
+Few simulation studies have explicitly investigated the performance of publication bias tests with non-independent data. Two simulation studies that we are aware of supported similar models to the multilevel-regression method we proposed here (Fernandez-Castilla et al., 2021; Rodgers & Pustejovsky, 2021). In addition, a general point to take from these two simulation studies is that most methods are prone to Type 2 error, even when the methods have nominal Type 1 error rates. Therefore, not detecting publication bias in a publication bias test should not be taken as a proof of no publication bias, including for multilevel regression.
+
+For meta-analysts to be able to assess publication bias, all empiricists need to report their statistical results, including their sample sizes and estimates of uncertainty (both SE and SD), transparently and compressively (Gerstner et al., 2017; Hennessy et al., 2021).
+
+
+
+# Power analysis 
+
+Using https://journals.sagepub.com/doi/10.1177/25152459221147260 
+
+Package is designed to work with non-independent effect sizes (i.e. one effect size per study), however I got in touch with the author of the package and one of the workarounds he suggested was performing a power analysis using the effect size with the highest variance from each study, and then repeating using the effect size with the lowest variance, and then checking that there the values were similar for both conditions (he predicted that the power would be relatively stable)
+
+## 1. Power analysis of individual studies included within my meta-analysis (sensitivity analysis)
+
+### Power from highest variance effect size for each study
+
+```{r - create dataset for use with metameta: study_id_str, SMD and SD: select effect size with highest variance for each study (a priori decision) - will repeat with lowest for sensitivity analysis} 
+SMD.g.highest_var <- SMD.g %>% 
+  group_by(study_id_str) %>% 
+  top_n(1, SMDV) %>% 
+  select(study_id_str, SMD, SMDV) %>% 
+  mutate(sei = sqrt(SMDV), 
+         yi = SMD) %>% 
+  select(-SMDV) 
+
+power_h <- mapower_se(SMD.g.highest_var, observed_es = 0.5602, name = 'psychosis MA')
+power_h_res <- power_h$dat
+
+```
+This analysis suggests that none of the studies included within this meta-analysis had the power to detect the effect sizes they reported with 80% confidence 
+
+### Power from lowest variance effect size for each study 
+
+```{r - create dataset for use with metameta: study_id_str, SMD and SD: select effect size with lowest variance for each study (a priori decision) } 
+SMD.g.lowest_var <- SMD.g %>% 
+  group_by(study_id_str) %>% 
+  top_n(-1, SMDV) %>%  
+  select(study_id_str, SMD, SMDV) %>% 
+  mutate(sei = sqrt(SMDV), 
+         yi = SMD) %>% 
+  select(-SMDV) 
+
+power_l <- mapower_se(SMD.g.lowest_var, observed_es = 0.5602, name = 'psychosis MA')
+power_l_res <- power_l$dat
+```
+This analysis also suggests that none of the studies included within this meta-analysis had the power to detect the effect sizes they reported with 80% confidence (very little difference in power estimates)
+
+### Sensitivity analysis 
+*unsure as to how you present the results of a sensitivity analysis properly*
+
+```{r - dataset with power to detect effect sizes with lowest and highest variances for each study (sensitivity analysis)}
+power_res <- power_h_res %>%
+  select(study_id_str, power_es_observed) %>% 
+  rename(power_highest_var = power_es_observed) %>% 
+  left_join(power_l_res) %>% 
+  select(study_id_str, power_highest_var, power_es_observed) %>% 
+  rename(power_lowest_var = power_es_observed) %>% 
+  mutate(discrepancy = power_lowest_var - power_highest_var)
+```
+Studies with 0 discrepancies are studies that only reported 1 effect size 
+
+
+## 2. Power analysis for my study specifically (using metapower)
+
+The metapower package requires the average size of cohorts contributing to each effect size (this is assumed to be one per study). Given that many of the studies included within my meta-analysis have multiple effect sizes, I have made the a priori decision to calculate power assuming one effect size per study (to remove effect of non-independence - i.e. assume that all effect sizes within a study are dependent) and calculate the average of the smallest cohort sizes (contributing to each effect size) for each study i.e. be conservative/assume the worst to use as my sample size within study
+
+```{r - average sample size for studies}
+ss <- SMD.g %>% 
+  select(study_id_str, disease_cohort_str, control_cohort_str, d.n, c.n) %>% 
+  distinct() 
+
+disease_ss <- ss %>% 
+  select(study_id_str, disease_cohort_str, d.n) %>% 
+  distinct() %>% 
+  group_by(study_id_str) %>% 
+  summarise(total_disease = sum(d.n)) 
+
+control_ss <- ss %>% 
+  select(study_id_str, control_cohort_str, c.n) %>% 
+  distinct() %>% 
+  group_by(study_id_str) %>% summarise(total_control = sum(c.n))
+
+disease_ss_con <- ss %>% select(study_id_str, d.n) %>% group_by(study_id_str) %>% top_n(-1, d.n)
+mean(disease_ss_con$d.n) #14.54
+control_ss_con <- ss %>% select(study_id_str, c.n) %>% group_by(study_id_str) %>% top_n(-1, c.n)
+mean(control_ss_con$c.n) #13.51
+#mean conservative size of cohorts contributing to each effect size = 14.0
+```
+Average size of cohorts contributing to each effect size = 14
+
+```{r - power analysis and plot}
+library(metapower)
+library(ggplot2)
+library(cowplot)
+
+power <- mpower(effect_size = 0.5602,
+                 study_size = 14,
+                 k = 48 ,
+                 i2 = 0.768,
+                 es_type = "d")
+summary(power)
+
+power_plot <- plot_mpower(power)
+power_plot <- power_plot + ggtitle("Power analysis for a meta-analysis of 48 studies with a mean total sample size of 14 (per effect size estimate) \nto detect pooled effect size of 0.5602 assuming 76.8% heterogeneity")
+power_plot
+
+```
+### Results
+My meta-analysis is adequately powered to detect the estimated pooled effect size and for that level of heterogeneity (92.7% power). Therefore, this meta-analysis is an example of how although individual included studies may not have sufficient statistical power to reliably detect a wide range of effect sizes, the synthesis of several of these studies into a summary effect size can increase statistical power. 
+
+
+# A priori power analysis for moderator analysis 
+
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8679832/ - unbalanced subgroups need lots of studies to achieve statistical power
+
+https://www.tqmp.org/RegularArticles/vol17-1/p024/p024.pdf - any power estimates I make will be over-inflated due to unequal distribution of n of effect sizes to levels of each categorical variable and non-independence in my dataset (but [as of 2021 and can't find any more info] there is currently no way to calculate power for such complicated data structures. 
+
+the mod_power function assumes that k = N, so my value for the k argument is actually 248 (but this assumes non-independent effect sizes). similar to above, to overcome this, I have assumed one effect size per study (i.e. that effect sizes from the same study are completely dependent on each other) 
+
+heterogeneity estimate from VCV corrected model: i2 = ~71%
+
+## Sex (a priori)
+Estrous cycle has been suggested to have protective effect on PPI impairment, so would expect female cohorts to have smaller effect size (e.g. 0.1), males to have a higher effect size (e.g. 0.6), and mixed cohorts to be in the middle (e.g. 0.35)
+```{r - estimate power for analysis of sex as a moderator a priori}
+power.sex <- mod_power(n_groups = 3,
+                effect_sizes = c(.1,.35,.6),
+                study_size = 14,
+                k = 48, 
+                i2 = .71,
+                es_type = "d") #doesnt allow you calculate for hedges g
+
+summary(power.sex)
+plot_mod_power(power.sex)
+```
+22.5% power to detect significant differences between sex subgroups (but this assumes even distribution of effect sizes to levels of the subgroup, so the actual power is much lower)
+
+## Species of animal (a priori)
+
+```{r - estimate power for analysis of species as a moderator}
+power.species <- mod_power(n_groups = 2,
+                effect_sizes = c(.5291, .6134),
+                study_size = 14,
+                k = 48,
+                i2 = .71,
+                es_type = "d") #doesnt allow you calculate for hedges g
+
+summary(power.species)
+plot_mod_power(power.species)
+```
+5.95% power to detect significant differences between species subgroups 
+
+## Route of polyI:C administration (a priori)
+evidence that ip injection route generates stronger immune response than iv or sc, so would expect effect size for ip to potentially be ~.6, iv to be ~.4, sc to be ~.2
+
+```{r - estimate power for analysis of administration route as a moderator}
+power.route <- mod_power(n_groups = 3,
+                effect_sizes = c(.6, .4, .2),
+                study_size = 14,
+                k = 48,
+                i2 = .71,
+                es_type = "d") #doesnt allow you calculate for hedges g
+
+summary(power.route)
+plot_mod_power(power.route)
+```
+15.7% power to detect significant differences between route of administration subgroups (but remember effect sizes are not evenly distributed)
+
+## Developmental stage at time of PPI testing (a priori)
+several lines of evidence suggest that PPI defecits only emerge post-puberty, so would expect effect size for juvenile to be 0, adolescence to be .05, adult to be .5
+
+```{r - estimate power for analysis of developmental stage at time of PPI testing as a moderator}
+power.stage <- mod_power(n_groups = 3,
+                effect_sizes = c(0, .05, .5),
+                study_size = 14,
+                k = 48,
+                i2 = .71,
+                es_type = "d") #doesnt allow you calculate for hedges g
+
+summary(power.stage)
+plot_mod_power(power.stage)
+```
+26.8% power to detect significant differences between developmental stages at time of PPI testing 
+
+## Strain = definitely don't have enough power 
+
+## Gestational day of polyI:C administration = definitely don't have enough power 
+
+## PolyI:C daily dose = don't know how to calculate power for analysis of continuous moderators
+
+## PND of PPI testing = don't know how to calculate power for analysis of continuous moderators
+
+
+# Exploring sources of heterogeneity: assess the effect of including variables as moderators 
+Adding multiple moderators variables as fixed-effects leads to a multi-moderator multilevel meta-regression (mixed model)
+
+The heterogeneity estimates for my model remain high despite accounting for sources of non-independence (p<0.001), therefore it is worthwhile assessing moderator effects to attempt to identify sources of heterogeneity. 
+Potential moderators (and the expected level of their effects) were determined a priori. 
+
+## 1. Sex of animal 
+```{r - introduce sex as moderator to 5 level model}
+ml_study.effect.outcome.time_sex <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                                                  mods = ~ I(sex_of_animals) -1, 
+                                                                  data = SMD.g, method = 'REML')
+summary(ml_study.effect.outcome.time_sex)
+r2_ml(ml_study.effect.outcome.time_sex)
+
+orchard_plot(ml_study.effect.outcome.time_sex, mod = "sex_of_animals", xlab = "Standardised mean difference (SMD)", group = "study_id_str", data = SMD.g, k = TRUE, g = TRUE, transfm = "none", angle = 0)
+
+```
+### Results 
+Female offspring cohorts do not show significantly impaired PPI (pooled effect size = 0.2970, p = 0.1019)
+Male offspring cohorts show a significantly impaired PPI (pooled effect size = 0.4631, p = 0.0001)
+Mixed offspring cohorts show a significantly impaired PPI (pooled effect size = 0.8995, p < 0.0001)
+
+Sex as a fixed effect variable explains 10.696% of the effect size heterogeneity (this tells us that other unmeasured factors captured in our random effect variables explain a far greater proportion)
+
+## 2. Species of animal 
+```{r - introduce species as moderator to 5 level model}
+ml_study.effect.outcome.time_species <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                                                  mods = ~ I(species_of_animal) -1, 
+                                                                  data = SMD.g, method = 'REML')
+summary(ml_study.effect.outcome.time_species)
+r2_ml(ml_study.effect.outcome.time_species)
+
+orchard_plot(ml_study.effect.outcome.time_species, mod = "species_of_animal", xlab = "Standardised mean difference (SMD)", group = "study_id_str", data = SMD.g, k = TRUE, g = TRUE, transfm = "none", angle = 0)
+
+```
+### Results 
+Rat cohorts show significantly impaired PPI (pooled effect size = 0.5291, p = <0.0001)
+Mouse cohorts show significantly impaired PPI (pooled effect size = 0.6134, p = 0.0002)
+
+Species as a fixed effect variable explains 0.36% of the effect size heterogeneity (tells us that other unmeasured factors captured in our random effect variables explain a far greater proportion)
+
+## 3. PolyI:C daily dose (CONT)
+
+```{r - introduce dev. stage as moderator to 5 level model}
+ml_study.effect.outcome.time_dose <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                                                  mods = ~ I(poly_I_C_daily_dose_mg_kg), 
+                                                                  data = SMD.g, method = 'REML')
+summary(ml_study.effect.outcome.time_dose)
+r2_ml(ml_study.effect.outcome.time_dose)
+
+bubble_plot(ml_study.effect.outcome.time_dose, mod = 'poly_I_C_daily_dose_mg_kg', group = 'study_id_str', xlab = 'PolyI:C dose administered (mg/kg)', ylab = 'SMD', data = SMD.g)
+
+```
+### Results 
+Test of moderator: QM = 6.3646, p = 0.0116 (polyI:C as a moderator explains a significant amount of heterogeneity and it is unlikely that differences in means between doses are due to chance)
+PolyI:C dose as a fixed effect variable explains 7.85% of effect size heterogeneity 
+
+## 4. Route of polyI:C administration 
+
+```{r - introduce dev. stage as moderator to 5 level model}
+ml_study.effect.outcome.time_route <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                                                  mods = ~ I(administration_route) -1, 
+                                                                  data = SMD.g, method = 'REML')
+summary(ml_study.effect.outcome.time_route)
+r2_ml(ml_study.effect.outcome.time_route)
+
+orchard_plot(ml_study.effect.outcome.time_route, mod = "administration_route", xlab = "Standardised mean difference (SMD)", group = "study_id_str", data = SMD.g, k = TRUE, g = TRUE, transfm = "none", angle = 0)
+
+```
+### Results 
+Cohorts administered polyI:C ip show significantly imparired PPI (pooled effect size = 0.4731, p = 0.0153)
+Cohorts administered polyI:C iv show significantly imparired PPI (pooled effect size = 0.6229, p < 0.0001)
+Cohorts administered polyI:C sc do not show significantly imparired PPI (pooled effect size = -0.2136, p = 0.7393)
+
+route of administration as a fixed effect variable explains 4.034% of effect size heterogeneity 
+
+## 5. Developmental stage of offspring at PPI testing 
+
+```{r - introduce dev. stage as moderator to 5 level model}
+ml_study.effect.outcome.time_stage <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                                                  mods = ~ I(developmental_stage_PPI) -1, 
+                                                                  data = SMD.g, method = 'REML')
+summary(ml_study.effect.outcome.time_stage)
+r2_ml(ml_study.effect.outcome.time_stage)
+
+orchard_plot(ml_study.effect.outcome.time_stage, mod = "developmental_stage_PPI", xlab = "Standardised mean difference (SMD)", group = "study_id_str", data = SMD.g, k = TRUE, g = TRUE, transfm = "none", angle = 0)
+
+```
+### Results 
+Juvenile cohorts show significantly impaired PPI (pooled effect size = 0.4027, p = 0.0072)
+Adolescent cohorts do not show significantly impaired PPI (pooled effect size = 0.1233, p = 0.5583)
+Adult cohorts show significantly impaired PPI (pooled effect size = 0.6276, p < 0.0001)
+
+Developmental stage of offspring at time of PPI testing as a fixed effect variable explains 5.455% of effect size heterogeneity
+
+## 6. PND of polyI:C testing (CONT)
+
+```{r - introduce time as moderator to 5 level model}
+ml_study.effect.outcome.time_time <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                                                  mods = ~ I(time), 
+                                                                  data = SMD.g, method = 'REML')
+summary(ml_study.effect.outcome.time_time)
+r2_ml(ml_study.effect.outcome.time_time)
+
+bubble_plot(ml_study.effect.outcome.time_time, mod = 'time', group = 'study_id_str', xlab = 'PND of PPI testing', ylab = 'SMD', data = SMD.g)
+
+```
+### Results 
+Test of moderator: QM = 7.2269, p = 0.0072 (time as a moderator explains a significant amount of effect size heterogeneity)
+PND of offspring at time of PPI testing as a fixed effect variable explains 4.069% of effect size heterogeneity 
+
+## Notes on interpreting the results of moderator effects in a meta-analysis 
+A limitation to meta-analysis in general is the risk of spurious findings due to statistical artefact rather than true associations between study design characteristics with effect sizes (Vesterinen, 2014) https://www.sciencedirect.com/science/article/pii/S016502701300321X
+
+# Dropped moderators (just not deleting code yet)
+
+## 1. Strain  
+```{r - introduce strain as moderator to 5 level model}
+ml_study.effect.outcome.time_strain <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                                                  mods = ~ I(strain) -1, 
+                                                                  data = SMD.g, method = 'REML')
+summary(ml_study.effect.outcome.time_strain)
+r2_ml(ml_study.effect.outcome.time_strain)
+
+orchard_plot(ml_study.effect.outcome.time_strain, mod = "strain", xlab = "Standardised mean difference (SMD)", group = "study_id_str", data = SMD.g, k = TRUE, g = TRUE, transfm = "none", angle = 0)
+
+```
+### Results 
+C57BL/6 cohorts show significantly impaired PPI (pooled effect size = 0.7976, p = 0.0020)  
+Sprague Dawley cohorts show significantly impaired PPI (pooled effect size = 0.4074, p = 0.0213) 
+Wistar cohorts show significantly impaired PPI (pooled effect size = 1.0724, p = 0.0001) 
+No other strains show significantly impaired PPI 
+
+                          estimate      se     zval    pval    ci.lb   ci.ub      
+I(strain)BALB/c             0.3593  0.6667   0.5389  0.5899  -0.9474  1.6661      
+I(strain)C57BL/6            0.7976  0.2576   3.0962  0.0020   0.2927  1.3025   ** 
+I(strain)C57BL/6J           0.5422  0.3322   1.6323  0.1026  -0.1089  1.1934      
+I(strain)C57BL/6N           0.5702  0.3672   1.5529  0.1204  -0.1495  1.2899      
+I(strain)ddY                0.0049  0.7071   0.0069  0.9945  -1.3809  1.3907      
+I(strain)long-evans         0.4066  0.3133   1.2977  0.1944  -0.2075  1.0207      
+I(strain)sprague-dawley     0.4074  0.1769   2.3026  0.0213   0.0606  0.7542    * 
+I(strain)wistar             1.0724  0.2803   3.8263  0.0001   0.5231  1.6217  *** 
+I(strain)wistar-hannover   -0.2136  0.6528  -0.3272  0.7435  -1.4930  1.0658      
+
+Strain of animal as a fixed effect variable explains 13.36% of effect size heterogeneity **(but strain as a variable overlaps with species as a variable)**
+
+
+# Post-hoc power analysis of moderator effects 
+
+## Sex (actual)
+```{r - estimate power for analysis of sex as a moderator post hoc}
+power.sex_ph <- mod_power(n_groups = 3,
+                effect_sizes = c(.297,.463,.8995),
+                study_size = 14,
+                k = 48,
+                i2 = .71,
+                es_type = "d") #doesnt allow you calculate for hedges g
+
+summary(power.sex)
+plot_mod_power(power.sex)
+```
+32.4% power to detect significant differences between sex subgroups when 'actual' estimates of effect size inputted 
+
+## Route of polyI:C administration (actual)
+
+```{r - estimate power for analysis of administration route as a moderator}
+power.route_ph <- mod_power(n_groups = 3,
+                effect_sizes = c(.4731, .6229, -0.2136),
+                study_size = 14,
+                k = 48,
+                i2 = .71,
+                es_type = "d") #doesnt allow you calculate for hedges g
+
+summary(power.route)
+plot_mod_power(power.route)
+```
+61.3% power to detect significant differences between route of administration subgroups using 'actual' effect size estimates (but remember effect sizes are not evenly distributed)
+
+## Developmental stage at time of PPI testing (actual)
+
+```{r - estimate power for analysis of developmental stage at time of PPI testing as a moderator}
+power.stage_ph <- mod_power(n_groups = 3,
+                effect_sizes = c(.4027, .1233, .6276),
+                study_size = 14,
+                k = 48,
+                i2 = .71,
+                es_type = "d") #doesnt allow you calculate for hedges g
+
+summary(power.stage_ph)
+plot_mod_power(power.stage_ph)
+```
+22.9% power to detect significant differences between developmental stages at time of PPI testing using 'actual' estimated effect sizes
+
+
+# A priori power calculations for meta-regression with categories of risk of bias assessment 
+The only RoB reporting outcomes that have enough not 'unclear' values, and are even remotely evenly distributed are unit of analysis error and incomplete outcome data. Want to assess if there is significant difference between studies assigned a high vs low RoB for given assessment criteria, so will exclude studies assigned an unclear RoB from the analysis. 
+
+## Unit of analysis error 
+I expect that studies using the incorrect unit of analysis will have a higher effect size than those using the correct unit of analysis 
+
+```{r - estimate power for analysing unit of analysis error (a priori)}
+power.uoa <- mod_power(n_groups = 2,
+                effect_sizes = c(-.7, -.3),
+                study_size = 14,
+                k = 48, #remove the one unclear study 
+                i2 = .71,
+                es_type = "d")
+
+summary(power.uoa)
+plot_mod_power(power.uoa)
+```
+28% power to detect significant differences between low and high UoA error studies, assuming a difference in effect sizes of .4. UoA error has a relatively even distribution across low and high risk (High = 26, Low = 21), so this estimate is likely not hugely inflated. still a little inflated because not completely heterogenous, and can't have k value as 47 because function wants k to be a multiple of n_groups 
+
+## Incomplete outcome data 
+
+I would expect that studies reporting incomplete outcome data would have a higher effect size than those reporting all outcome data 
+
+```{r - estimate power for analysing unit of analysis error (a priori)}
+power.iod <- mod_power(n_groups = 2,
+                effect_sizes = c(-.7, -.3),
+                study_size = 14,
+                k = 34, #remove the one unclear study 
+                i2 = .71,
+                es_type = "d")
+
+summary(power.iod)
+plot_mod_power(power.iod)
+```
+21% power to detect significant differnces between low and high incomplete outcome data studies. This estimate is likely to be more inflated, as the distribution of studies is less even (almost 1:2 - High = 12, Low = 21). 
+
+# Explore sources of heterogeneity: effect of bias 
+
+## Unit of analysis error 
+
+```{r - unit of analysis error as a moderator }
+uoa.mod <- SMD.g %>% filter(ro_b_assessment_unit_of_analysis_error != 'unclear RoB')
+
+ml_study.effect.outcome.time_uoa <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                                                  mods = ~ I(ro_b_assessment_unit_of_analysis_error) -1, 
+                                                                  data = uoa.mod, method = 'REML')
+summary(ml_study.effect.outcome.time_uoa)
+r2_ml(ml_study.effect.outcome.time_uoa)
+
+orchard_plot(ml_study.effect.outcome.time_uoa, mod = "ro_b_assessment_unit_of_analysis_error", xlab = "Standardised mean difference (SMD)", group = "study_id_str", data = uoa.mod, k = TRUE, g = TRUE, transfm = "none", angle = 0)
+```
+Pooled effect size for high RoB = -0.4374
+Pooled effect size for low RoB = -0.6987
+Explains 3.28% of heterogeneity 
+No significant difference (but even lower power than a priori power calculations suggested)
+
+## Incomplete outcome data 
+
+```{r - incomplete outcome data as a moderator }
+iod.mod <- SMD.g %>% filter(ro_b_assessment_incomplete_outcome_data != 'unclear RoB')
+
+ml_study.effect.outcome.time_iod <- rma.mv(yi = SMD, V = SMDV, random = ~1 | study_id_str / same_cohort_diff_PPI_param / same_coh_same_PPI_param_diff_time / effect_id, 
+                                                                  mods = ~ I(ro_b_assessment_incomplete_outcome_data) -1, 
+                                                                  data = iod.mod, method = 'REML')
+summary(ml_study.effect.outcome.time_iod)
+r2_ml(ml_study.effect.outcome.time_iod)
+
+orchard_plot(ml_study.effect.outcome.time_iod, mod = "ro_b_assessment_incomplete_outcome_data", xlab = "Standardised mean difference (SMD)", group = "study_id_str", data = iod.mod, k = TRUE, g = TRUE, transfm = "none", angle = 0)
+```
+Pooled effect size for high RoB = -0.5356
+Pooled effect size for low RoB = -0.7235
+Explains 1.31% of heterogeneity 
+No significant difference (but even lower power than a priori power calculations suggested)
+
+
