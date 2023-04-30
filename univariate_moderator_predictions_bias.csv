@@ -1,0 +1,31 @@
+Moderator,Level,SMD,l95,u95,shape
+Blinding of animal handlers/carers,Unclear RoB,-0.5295303,-0.7203613,-0.3386993,x
+Blinding of animal handlers/carers,High RoB,-0.03848536,-1.18291,1.105939,x
+Blinding of animal handlers/carers,Low RoB,-0.3246557,-1.086035,0.4367233,x
+Blinding of outcome assessors ,Unclear RoB,-0.5342228,-0.736599,-0.3318466,x
+Blinding of outcome assessors ,High RoB,-0.03858569,-1.173136,1.095965,x
+Blinding of outcome assessors ,Low RoB,-0.4318953,-0.8708686,0.007077917,x
+Random housing of animals ,Unclear RoB,-0.5059486,-0.6878106,-0.3240866,x
+Random housing of animals ,High RoB,-0.8683457,-1.943643,0.2069518,x
+Random housing of animals ,Low RoB,0.4452512,-0.9714551,1.861958,x
+A priori power calculations,Unclear RoB,-0.484755,-0.6609822,-0.3085277,x
+A priori power calculations,Low RoB,-1.454774,-2.941892,0.0323444,x
+Conflict of interest ,Unclear RoB,-0.3744335,-0.6721962,-0.07667089,x
+Conflict of interest ,High RoB,-1.135689,-1.850323,-0.4210545,x
+Conflict of interest ,Low RoB,-0.4957748,-0.7104443,-0.2811053,x
+Unit of analysis error ,Unclear RoB,-1.271978,-2.637266,0.09331001,x
+Unit of analysis error ,High RoB,-0.4036561,-0.6310988,-0.1762133,x
+Unit of analysis error ,Low RoB,-0.6223287,-0.9119594,-0.3326979,x
+Random outcome assessment ,Unclear RoB,-0.3812935,-0.582018,-0.180569,x
+Random outcome assessment ,Low RoB,-0.8143362,-1.149235,-0.4794372,x
+Presence of random sequence generation,Unclear RoB,-0.3354432,-0.5544055,-0.1164809,x
+Presence of random sequence generation,Low RoB,-0.7294316,-0.9975803,-0.461283,x
+Reporting of baseline characteristics ,Unclear RoB,-0.4763733,-0.6659999,-0.2867468,x
+Reporting of baseline characteristics ,Low RoB,-0.6908712,-1.215317,-0.1664255,x
+Allocation concealment ,Unclear RoB,-0.5295303,-0.7203613,-0.3386993,x
+Allocation concealment ,High RoB,-0.03848536,-1.18291,1.105939,x
+Allocation concealment ,Low RoB,-0.3246557,-1.086035,0.4367233,x
+Incomplete outcome data ,Unclear RoB,-0.3912025,-0.7147886,-0.06761631,x
+Incomplete outcome data ,High RoB,-0.4365402,-0.8003822,-0.07269832,x
+Incomplete outcome data ,Low RoB,-0.6258117,-0.90195,-0.3496735,x
+Pooled effect size ,,-0.5001,-0.6771,-0.323,y

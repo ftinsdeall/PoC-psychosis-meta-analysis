@@ -1,0 +1,25 @@
+Moderator,Level,SMD,l95,u95,shape
+Administration route,Intravenous,-0.5619702,-0.7747242,-0.3492161,x
+Administration route,Intraperitoneal,-0.4080437,-0.7458429,-0.07024455,x
+Administration route,Subcutaneous ,0.2092681,-0.9413472,1.359883,x
+Sex of cohort,Male,-0.4183216,-0.6331878,-0.2034555,x
+Sex of cohort,Female,-0.2568912,-0.5970674,0.08328495,x
+Sex of cohort,Mixed,-0.7831032,-1.108128,-0.4580785,x
+Developmental stage at PPI testing ,Juvenile ,-0.3293277,-0.6276382,-0.03101718,x
+Developmental stage at PPI testing ,Adolescent ,-0.06956562,-0.4456619,0.3065306,x
+Developmental stage at PPI testing ,Adult,-0.5764726,-0.7648016,-0.3881435,x
+Gestational stage at polyIC injection,Early-mid gestation ,-0.761603,-1.061686,-0.4615205,x
+Gestational stage at polyIC injection,Mid-late gestation,-0.3490741,-0.5713637,-0.1267844,x
+Gestational stage at polyIC injection,Late gestation ,-0.4646616,-0.8962649,-0.0330582,x
+Species,Rat,-0.4689012,-0.6973435,-0.2404588,x
+Species,Mouse,-0.5563216,-0.8466071,-0.266036,x
+Strain,Sprague-Dawley,-0.3502929,-0.6536414,-0.04694446,x
+Strain,BALB/c,-0.3582353,-1.48768,0.7712098,x
+Strain,C57BL/6,-0.7065362,-1.162985,-0.2500873,x
+Strain,C57BL/6J,-0.5521387,-1.190924,0.08664638,x
+Strain,C57BL/6N,-0.5521387,-1.190924,0.08664638,x
+Strain,ddY,-0.005079909,-1.196816,1.186656,x
+Strain,Long-Evans ,-0.3775776,-0.9033232,0.148168,x
+Strain,Wistar,-1.009102,-1.513663,-0.5045405,x
+Strain,Wistar-Hannover,0.2092652,-0.9530425,1.371573,x
+Pooled effect size ,,-0.5001,-0.6771,-0.323,y

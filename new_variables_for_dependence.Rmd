@@ -1,0 +1,114 @@
+---
+title: "fiona_help"
+author: "Francesca Tinsdeall"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(tidyverse, 
+               knitr,
+               here,
+               DT,
+               readxl, 
+               metafor,
+               clubSandwich,
+               orchaRd, 
+               MuMIn,
+               patchwork,
+               GoodmanKruskal,
+               networkD3,
+               ggplot2,
+               plotly,
+               ggsignif,
+               visdat,
+               ggalluvial,
+               ggthemr, 
+               cowplot,
+               grDevices,
+               png,
+               grid,
+               gridGraphics,
+               pander,
+               formatR,
+               rmdformats
+               )
+
+install.packages("pacman")
+pacman::p_load(devtools, tidyverse, metafor, patchwork, R.rsp, emmeans)
+
+devtools::install_github("daniel1noble/orchaRd", force = TRUE)
+devtools::install_github('cttobin/ggthemr')
+
+dat <- read.csv('meta_data.csv')
+```
+
+
+# Make variable to group effect sizes that come from same cohorts and same outcome measurements (but at different time points)
+
+```{r}
+SMD_new <- SMD %>% group_by(study_id_str, disease_cohort_str, control_cohort_str, outcome_id_str) %>% 
+  mutate(different_times = n())
+```
+
+# Make variable to group effect sizes that come from same cohorts at same time point but from different outcome measures 
+
+```{r}
+SMD_new <- SMD_new %>% 
+  ungroup() %>% 
+  group_by(study_id_str, disease_cohort_str, control_cohort_str, time) %>% 
+  mutate(different_outcome = n())
+
+write.csv(SMD_new, 'meta.csv')
+```
+
+manipulation in excel to match up cohorts 
+
+# Read in excel file
+
+```{r}
+SMD.g <- read.csv('meta.csv')
+```
+
+# Make variable that groups effect sizes that come from same outcome measurement protocol at the same time (but different cohorts)
+
+```{r}
+SMD_new <- SMD.g %>% 
+  group_by(study_id_str, outcome_id_str, time) %>% 
+  distinct()
+  mutate(same_PPI_param_same_time_diff_coh = n())
+
+write.csv(SMD_new, 'meta.csv')
+
+SMD.g <- read.csv('meta.csv')
+
+```
+
+# Make variable that groups effect sizes that come from the same cohorts 
+
+```{r}
+SMD_new <- SMD.g %>% 
+  group_by(study_id_str, disease_cohort_str, control_cohort_str) %>% 
+  mutate(cohort = n())
+
+write.csv(SMD_new, 'meta.csv')
+SMD.g <- read.csv('meta.csv')
+```
+
+
+
+
+
+
+#not done below in most current meta dataset
+
+
+
+
+
+
+```
+
+
+
+
