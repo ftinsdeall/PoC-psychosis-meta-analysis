@@ -51,6 +51,12 @@ SMD.g <- read.csv('meta.csv')
 
 Hedges g to account for small sample sizes (default for SMD when using the escalc() function) - Hedge’s g (statistically corrects for variance that may be introduced when sample sizes are small (Larry V. Hedges 1981)). Of note, I use the “true” number of control animals (c.n), where the sample size of the control group is divided by the number of treatment groups it serves (if one control group serves multiple treatment groups), to avoid control groups contributing multiple times to the calculation of an effect size (Vesterinen et al., 2014). 
 
+Cohen's rule of thumb for SMD: ref. Cohen (1977), "Statistical Power Analysis for the Behavioral Sciences", Routledge.
+
+Small effect (cannot be discerned by the naked eye) = 0.2
+Medium Effect = 0.5
+Large Effect (can be seen by the naked eye) = 0.8
+
 
 ## 2. Fit a simple random effects model - assumes independence 
 
@@ -697,7 +703,7 @@ SMD.g <- SMD.g %>%
 
 ```{r - add all variables with reference level set to largest level within the factor and including a species*strain interaction term, results='hide'}
 ml_study.cohort.effect_re.VCV.5.bm <- rma.mv(yi = SMD, V = VCV.5, random = ~1 | study_id_str / cohort / effect_id, 
-                                             mods = ~ relevel((administration_route), ref = 'iv') + relevel((sex_of_animals), ref = 'male') + poly_I_C_daily_dose_mg_kg + I(time) 
+                                             mods = ~ relevel((administration_route), ref = 'iv') + relevel((sex_of_animals), ref = 'male') + I(poly_I_C_daily_dose_mg_kg) + I(time) 
                                              + relevel((developmental_stage_PPI), ref = 'adult') + GD_first_administration + relevel((gestational_stage_poly), ref = 'mid-late gestation') +
                                                relevel((species_of_animal), ref = 'rat')*relevel((strain), ref = 'sprague-dawley'), data = SMD.g, method = 'REML')
                                              
@@ -748,6 +754,7 @@ pred_biol_method_formatted %>%
              variables as moderators')
 ```
 
+
 ## 2.1 Add all risk of bias moderator variables as moderators 
 Random sequence generation, random outcome assessment, baseline characteristic reporting, random housing, allocation concealment, blinding of outcome assessment, blinding of animal handlers/carers, a priori power calculations, conflict of interest, unit of analysis error
 
@@ -790,6 +797,8 @@ r2_ml(ml_study.cohort.effect_re.VCV.5.bias.sep)
 Inclusion of these variables as fixed effects (moderators) explains 29% of the variance 
 Inclusion of these variables as fixed effects (moderators) in addition to the random effects terms explains 81.2% of the variance
 
+Conflict of interest categorization status was shown to explain a significant degree of effect size heterogeneity (p = 0.0310 for difference between low and high RoB)
+
 ### 2.1 Get predicted values (estimate, CIs) for the individual levels of risk of bias moderator 
 
 ```{r - get full multivariate predictions for bias moderators, results = 'hide'}
@@ -813,6 +822,7 @@ pred_bias_formatted %>%
              random.housing = md('random housing'), 
              random.outcome.assessment = md('random outcome assessment'), 
              blinded.outcome.assessment = md('blinded outcome assessment'), 
+             incomplete.outcome.data = md('incomplete outcome data'),
              uoa.error = md('unit of analysis error'), 
              coi = md('conflict of interest')) %>% 
  opt_row_striping() %>% 
@@ -834,6 +844,117 @@ This could be done by assessing variation from only moderators relating to PPI t
 *does this make any sense at all or would it make a statistician scream?*
 Could it also be done by calculating lnCV for polyI:C cohort (let this be x), and then lnCV for control cohort (let this be y) and comparing the two? Would it be logical that x-y = the variability attributed to disease model induction protocol? 
 
+## 4.0 What happens when you add all variables both biomed and RoB, (account for colinearity for all)? 
+
+```{r - add every extracted variable as a moderator in a multilevel multivariate model, results='hide'}
+
+ml_study.cohort.effect_re.VCV.5.everything <- rma.mv(yi = SMD, V = VCV.5, random = ~1 | study_id_str / cohort / effect_id, 
+                                             mods = ~ relevel((administration_route), ref = 'iv') + relevel((sex_of_animals), ref = 'male') + I(poly_I_C_daily_dose_mg_kg) + I(time) 
+                                             + relevel((developmental_stage_PPI), ref = 'adult') + GD_first_administration + relevel((gestational_stage_poly), ref = 'mid-late gestation') +
+                                               relevel((species_of_animal), ref = 'rat')*relevel((strain), ref = 'sprague-dawley') + relevel((ro_b_assessment_blinding_of_animal_carers_handlers), ref = 'unclear RoB') + 
+                                               relevel((ro_b_assessment_blinding_of_outcome_assessors), ref = 'unclear RoB') +
+                                               relevel((ro_b_assessment_random_housing), ref = 'unclear RoB') +
+                                               relevel((ro_b_assessment_a_priori_power_calculations), ref = 'unclear RoB') +
+                                               relevel((ro_b_assessment_conflict_of_interest), ref = 'low RoB') + 
+                                               relevel((ro_b_assessment_unit_of_analysis_error), ref = 'high RoB') + 
+                                               relevel((ro_b_assessment_random_outcome_assessment), ref = 'unclear RoB') + 
+                                               relevel((ro_b_assessment_presence_of_sequence_generation), ref = 'unclear RoB') + 
+                                               relevel((ro_b_assessment_baseline_characteristics), ref = 'unclear RoB') + 
+                                               relevel((ro_b_assessment_allocation_concealment), ref = 'unclear RoB') + 
+                                               relevel((ro_b_assessment_incomplete_outcome_data), ref = 'low RoB'), data = SMD.g, method = 'REML')
+
+summary(ml_study.cohort.effect_re.VCV.5.everything)
+```
+When you account for colinearity between all moderator variables, both biomed and RoB - the following variables are suggested to have a significant influence on effect size observed: 
+1. Administration route (sc vs. iv: p = 0.0717) *new*
+2. PolyI:C daily dose (p = 0.0064) *more significant than univariate model*
+3. Developmental stage at PPI testing (adolescent vs. adult: p = 0.0388) *less significant than univariate model*
+4. Random housing RoB categorisation (low vs unclear RoB: p = 0.04) *new*
+5. Unit of analysis error RoB categorisation (high vs unclear RoB: p = 0.0165) *new*
+
+## 5.0 More detail on the variables that explain a significant degree of effect size heterogeneity in multivariate models (after accounting for colinearity between moderator variables)
+Administration route, PolyI:C daily dose and developmental stage at PPI testing are the only biomod moderator variables that explain a significant degree of effect size heterogeneity in the multilevel multivariate model. Regarding RoB analysis, random housing and unit of analysis error RoB shown to explain significant degree of heterogeneity between effect sizes
+
+### 1. Administration route 
+
+```{r - univariate moderator analysis for administration route, results='hide'}
+ml_study.cohort.effect_re.VCV.5.administration_route <- rma.mv(yi = SMD, V = VCV.5, random = ~1 | study_id_str / cohort / effect_id, 
+                                                               mods = ~ relevel((administration_route), ref = 'iv'), data = SMD.g, method = 'REML')
+
+summary(ml_study.cohort.effect_re.VCV.5.administration_route)
+```
+Administration route doesn't have a statistically significant effect size in univariate model i.e. when colinearity not accounted for (omnibus test of moderators p = 0.3552), but it emerges when we account for colinearity (shows importance of accounting for confounding from colinearity between moderator variables when performing meta-analysis). However, must be acknowledged that the power to detect any significant differences in effect size between different administration routes is very low due to very uneven distribution of effect sizes across levels of the categorical variable
+
+### 2. PolyI:C daily dose 
+
+```{r - univariate moderator analysis for polyI:C dose, results='hide'}
+ml_study.cohort.effect.re.VCV.5.polyIC <- rma.mv(yi = SMD, V = VCV.5, random = ~1 | study_id_str / cohort / effect_id, 
+                                                 mods = ~ poly_I_C_daily_dose_mg_kg, 
+                                                 data = SMD.g, 
+                                                 test = 't',
+                                                 method = 'REML')
+
+summary(ml_study.cohort.effect.re.VCV.5.polyIC)
+r2_ml(ml_study.cohort.effect.re.VCV.5.polyIC)
+```
+Daily dose of polyI:C seen to have statistically significant effect on effect size when all biological moderator variables are added together (p = 0.0085). The degree of effect size heterogeneity explained by polyI:C daily dose is actually more significant when colinearity is accounted for (only p = 0.0382 in univariate model). 
+
+PolyI:C dose as a fixed effect moderator alone explains 6% of effect size heterogeneity. 
+PolyI:C dose as a fixed effect moderator in addition to the random effects accounting for non-independence in my multilevel model accounts for 75.7% of effect size heterogeneity 
+
+
+```{r - regression plot of polyI:C daily dose}
+bubble_plot(ml_study.cohort.effect.re.VCV.5.polyIC, mod = "poly_I_C_daily_dose_mg_kg", 
+            xlab = "Daily dose of polyI:C (mg/kg)", ylab = "Effect size estimates (SMD)",
+            group = "study_id_str",
+            data = SMD.g, legend.pos = "none") 
+```
+What we can see here is that as the daily dose of polyI:C administered to dams during gestation increases, so does the degree of phenotypic abnormality we see in the offspring. At 20mg/kg polyI:C daily, we see an effect size that has a magnitude approximately double that seen at 5mg/kg of polyI:C daily. (approximately -1 compared to -0.5). If we're going by Cohen's rule of thumb, this suggests that we see large effect sizes in %PPI impairment of the offpsring of dams administered 20mg/kg polyI:C, and moderate effect sizes in %PPI impairment in the offspring of dams administered 5mg/kg polyI:C. 
+
+A limitation of this analysis is that it is regressed on a straight line, and we can see that this line is not projected cross the origin. This implies that there is still a %PPI impairment when no polyI:C is given - thus threatening the face validity of the polyI:C model. However, the 95% confidence intervals (dashed lines) are predicted to extend across the origin. 
+
+
+### 3. Developmental stage at PPI testing 
+
+```{r - univariate moderator analysis for PPI testing, results='hide'}
+ml_study.cohort.effect_re.VCV.5.dev_stage <- rma.mv(yi = SMD, V = VCV.5, random = ~1 | study_id_str / cohort / effect_id, 
+                                                               mods = ~ relevel((developmental_stage_PPI), ref = 'adult'), data = SMD.g, method = 'REML')
+
+summary(ml_study.cohort.effect_re.VCV.5.dev_stage)
+r2_ml(ml_study.cohort.effect_re.VCV.5.dev_stage)
+```
+Developmental stage at PPI testing shown to have statistically effect on effect size when all biological moderator variables are added together. Developmental stage of offspring at PPI testing as a moderator overall is shown to have statistically significant effect on effect size in univariate model (omnibus test of moderators p = 0.0057). 
+
+For both multivariate and univariate moderator analysis, only adolescent offspring show a significant difference in effect size to adult offspring (the reference level) - the analysis showed no significant difference between effect sizes observed in adult offspring compred to juvenile offspring. Accounting for colinearity does reduce the level of significance of the difference - (p = 0.0199 after accounting for colinearity, when colinearity is not accounted for p = 0.0072). 
+
+Developmental stage at PPI testing as a fixed effect moderator alone explains 7.2% of effect size heterogeneity. 
+Developmental stage at PPI testing as a fixed effect moderator in addition to the random effects accounting for non-independence in my multilevel model accounts for 77.8% of effect size heterogeneity 
+
+### 4. Random housing of animals RoB
+
+```{r - univariate moderator analysis for random housing of animals, results='hide'}
+ml_study.cohort.effect_re.VCV.5.bias.randhous <- rma.mv(yi = SMD, V = VCV.5, random = ~1 | study_id_str / cohort / effect_id, 
+                                                         mods = ~ relevel((ro_b_assessment_random_housing), 
+                                                                          ref = 'unclear RoB'), 
+                                                         data = SMD.g, method = 'REML')
+
+summary(ml_study.cohort.effect_re.VCV.5.bias.randhous)
+```
+Random housing of animals RoB categorisation doesn't have a statistically significant effect size in univariate model (i.e. when colinearity not accounted for, omnibus test of moderators p = 0.3388), but it emerges when we account for colinearity (again shows importance of accounting for confounding from colinearity between moderator variables when performing meta-analysis). Again however, this variable has a very uneven distribution of effect sizes across the levels of the moderator variable, and so power is very low
+
+### 5. Unit of analysis error RoB
+
+```{r - univariate moderator analysis for unit of analysis error, results='hide'}
+ml_study.cohort.effect_re.VCV.5.bias.uoaerror <- rma.mv(yi = SMD, V = VCV.5, random = ~1 | study_id_str / cohort / effect_id, 
+                                                         mods = ~ relevel((ro_b_assessment_unit_of_analysis_error), 
+                                                                          ref = 'high RoB'), 
+                                                         data = SMD.g, method = 'REML')
+
+summary(ml_study.cohort.effect_re.VCV.5.bias.uoaerror)
+```
+Unit of analysis error categorisation doesn't have a statistically significant effect size in univariate model (i.e. when colinearity not accounted for, omnibus test of moderators p = 0.2772, but it emerges when we account for colinearity (again shows importance of accounting for confounding from colinearity between moderator variables when performing meta-analysis). Again however, this variable has a uneven distribution of effect sizes across the levels of the moderator variable, and so power to detect significant results is low) 
+
+
 # Exploring sources of heterogeneity: assess the effect of including variables as moderators (univariate)
 
 ## 1. Biological/methodological variables 
@@ -850,7 +971,7 @@ univariate_moderator_predictions$Moderator <- fct_relevel(univariate_moderator_p
 
 ```
 
-### Forest plot 
+### Forest plot for categorical variables 
 
 ```{r - forest plot of univariate predicted results for biological moderator variables}
 bio_mods_plot <- univariate_moderator_predictions %>% 
@@ -869,7 +990,7 @@ bio_mods_plot <- univariate_moderator_predictions %>%
   geom_rect(aes(fill = Moderator),xmin = -Inf,xmax = Inf,
             ymin = -Inf,ymax = Inf,alpha = 0.1) +
   geom_point(shape=1, size=0.3)+
-  labs(title = 'Estimated values for biological and methodological moderator variables')+
+  labs(title = 'Predicted effect sizes for biological and methodological moderator variables')+
   theme(plot.title=element_text(size=16,face="bold"),
         legend.position = "none",
         axis.text.y=element_text(),
@@ -882,6 +1003,8 @@ bio_mods_plot <- univariate_moderator_predictions %>%
 
 bio_mods_plot
 ```
+while not statistically significantly different, we get more reproducible and robust results when we use adults. important to note that this is only pilot work - I am not trying to make any big claims or draw any conclusions, but it highlights that this approach is a feasable way in which to reduce the workload required to identify the corpus of studies needed for a meta-analysis of the published studies for a given research questions 
+
 
 ## 2. Risk of bias moderator variables 
 
@@ -922,7 +1045,7 @@ bio_mods_plot_bias <- univariate_moderator_predictions_bias %>%
   geom_rect(aes(fill = Moderator),xmin = -Inf,xmax = Inf,
             ymin = -Inf,ymax = Inf,alpha = 0.1) +
   geom_point(shape=1, size=0.3)+
-  labs(title = 'Estimated values for risk of bias moderator variables')+
+  labs(title = 'Predicted effect sizes for risk of bias moderator variables')+
   theme(plot.title=element_text(size=16,face="bold"),
         legend.position = "none",
         axis.text.y=element_text(),
